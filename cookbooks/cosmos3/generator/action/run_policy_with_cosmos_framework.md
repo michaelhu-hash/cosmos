@@ -118,3 +118,28 @@ python policies/cosmos3/run.py \
 Example output:
 
 <video controls width="864" height="480" src="https://github.com/user-attachments/assets/95a16737-5eb9-4b3f-a0ad-3a6b929b423f"></video>
+
+## Cosmos3-Nano-HumanAction (human hands and body)
+
+[Cosmos3-Nano-HumanAction](https://huggingface.co/nvidia/Cosmos3-Nano-HumanAction) runs policy through the same
+`cosmos_framework.scripts.inference` entrypoint as forward and inverse dynamics, with `model_mode: "wam"` (video and
+actions are sampled jointly from one conditioning frame plus the task caption). The three domains and their readers are
+described in the forward-dynamics notebook; the spec below uses the Action100M hand example. `raw_action_dim` is 48 for
+`webhumanaction_hand`, 57 for `webhumanaction_body` and `hand_pose`.
+
+```jsonl
+{"name": "humanaction_hand_policy", "model_mode": "wam", "prompt": "<task or subtask caption>", "vision_path": "/abs/path/first_frame.png", "domain_name": "webhumanaction_hand", "raw_action_dim": 48, "view_point": "ego_view", "fps": 15, "action_chunk_size": 72, "image_size": 480, "num_frames": 73, "resolution": "480", "seed": 0, "num_steps": 30, "guidance": 1.0, "shift": 5.0}
+```
+
+```bash
+MASTER_ADDR=127.0.0.1 MASTER_PORT=29511 RANK=0 WORLD_SIZE=1 LOCAL_RANK=0 \
+.venv/bin/python -m cosmos_framework.scripts.inference \
+  --parallelism-preset=latency --no-guardrails \
+  -i humanaction_policy.jsonl -o outputs/humanaction_policy \
+  --checkpoint-path nvidia/Cosmos3-Nano-HumanAction \
+  --seed 0
+```
+
+The rollout video is written to `outputs/humanaction_policy/humanaction_hand_policy/0/vision.mp4` and the normalized
+action chunk to `sample_outputs.json` (`outputs[0].content.action`, `[72, 48]`). Invert the normalization with the
+matching reader (`WebHumanActionHandLeRobotDataset(...).denormalize(actions)`).

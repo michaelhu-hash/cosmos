@@ -22,6 +22,7 @@ The rest of this doc shows how to run these modes on selected embodiments direct
   - [Quickstart](#quickstart-2)
   - [Notebook walkthrough](#vllm-omni-notebook-walkthrough)
 - [Post-Train for Cosmos3-Nano-Policy-DROID](#post-train-for-cosmos3-nano-policy-droid)
+- [Cosmos3-Nano-HumanAction](#cosmos3-nano-humanaction)
 
 ## Overview
 
@@ -55,6 +56,9 @@ fingers.
 | [DROID](https://arxiv.org/abs/2403.12945) | End-effector pose (9D) + gripper grasp state (1D) | 10D | Meter | Multiview concatenation, `to-OpenCV`, normalization | 16 frames @ 15FPS |
 | UMI | End-effector pose (9D) + gripper grasp state (1D) | 10D | Meter | Normalization | 16 frames @ 20FPS |
 | Human hand pose | Ego pose (9D) + right wrist (9D) + right fingertips (15D) + left wrist (9D) + left fingertips (15D) | 57D | Meter | Wrist-frame alignment, normalization | 16 frames @ 15FPS |
+| Human hand pose (Cosmos3-Nano-HumanAction, `hand_pose`) | Camera pose (9D) + right wrist (9D) + right fingertips (15D) + left wrist (9D) + left fingertips (15D) | 57D | Meter | Wrist-frame alignment, 16-step anchored deltas, piecewise-asinh normalization | 72 frames @ 15FPS |
+| Action100M hands (Cosmos3-Nano-HumanAction, `webhumanaction_hand`) | Right wrist (9D) + right fingertips (15D) + left wrist (9D) + left fingertips (15D) | 48D | Meter | Wrist-frame alignment, 16-step anchored deltas, piecewise-asinh normalization | 72 frames @ 15FPS |
+| Action100M body (Cosmos3-Nano-HumanAction, `webhumanaction_body`) | Head pose (9D) + right wrist (9D) + right fingertips (15D) + left wrist (9D) + left fingertips (15D) | 57D | Meter | Wrist-frame alignment, 16-step anchored deltas, piecewise-asinh normalization | 72 frames @ 15FPS |
 
 Action data samples across different embodiments can be inspected interactively in the [Cosmos3 Action Viewer](https://huggingface.co/spaces/nvidia/Cosmos3-Action-Viewer) Hugging Face Space.
 
@@ -222,3 +226,29 @@ simulation benchmark with the same launch-script pattern.
 ## TODO
 
 - [ ] Add additional embodiment examples.
+
+## Cosmos3-Nano-HumanAction
+
+[Cosmos3-Nano-HumanAction](https://huggingface.co/nvidia/Cosmos3-Nano-HumanAction) is Cosmos3-Nano post-trained on
+human egocentric data and serves three domains from one checkpoint: Mecka hands (`hand_pose`, id 3, 57D), Action100M
+hands (`webhumanaction_hand`, id 31, 48D) and Action100M body (`webhumanaction_body`, id 24, 57D). Every notebook in this
+directory ends with a HumanAction section that runs all three on the checked-in single-episode assets
+(`assets/human_hand_pose_lerobot_example`, `assets/webhumanaction_hand_lerobot_example`,
+`assets/webhumanaction_body_lerobot_example`) with the post-training recipe: 15 fps, 72-step chunks, 480p tier,
+`backward_chunk_anchored_16f` rot6d deltas, `piecewise_asinh_rot` normalization (stats under cosmos-framework
+`normalizer_stats/`), 30 steps, guidance 1.0, flow shift 5.0.
+
+Things that differ from the other examples:
+
+- The LeRobot readers (`WebHumanActionHandLeRobotDataset`, `WebHumanActionBodyLeRobotDataset`, and
+  `HumanHandPoseLeRobotDataset` with `chunk_length=72, pose_convention="backward_chunk_anchored_16f",
+  action_normalization="piecewise_asinh_rot", stats_path=HUMANACTION_NORMALIZER_PATH`) build the action tensors;
+  `dataset.denormalize()` maps predictions back to meters.
+- Pass `raw_action_dim` explicitly (48 / 57 / 57) to the Cosmos Framework specs and to the vLLM-Omni and SGLang requests.
+- Diffusers: disable TF32 before building the pipeline (`torch.backends.cuda.matmul.allow_tf32 = False`,
+  `torch.set_float32_matmul_precision("highest")`). NVIDIA NGC containers enable TF32 by default, which corrupts the
+  rotary embedding of the generation tokens and costs about 3 dB in forward dynamics and 10-40x action error in inverse
+  dynamics.
+- SGLang serves inverse dynamics and policy through `POST /v1/actions/generations`, which returns actions only; the
+  policy notebook renders the rollout with a second forward-dynamics request.
+- Set `COSMOS3_HUMANACTION_MODEL` to a local export to run the sections against a checkpoint that is not on Hugging Face.
